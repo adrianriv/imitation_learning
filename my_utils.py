@@ -1,5 +1,6 @@
 import matplotlib
 import pandas as pd
+from moviepy.editor import ImageSequenceClip
 from matplotlib import pyplot as plt
 
 def plot_history(history):
@@ -26,3 +27,7 @@ def plot_history(history):
     plt.legend()
     #plt.show()
     return plt
+
+def create_video(frames, video_name='0000'):
+    clip = ImageSequenceClip(frames, fps=70)
+    clip.write_videofile(video_name+'.mp4')

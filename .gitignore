@@ -75,3 +75,6 @@ staticfiles
 *.png
 *.eps
 good_choices.rtf
+
+*.mp4
+*.json

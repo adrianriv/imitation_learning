@@ -8,19 +8,19 @@ from tensorflow.keras import layers
 import gym
 
 import load_policy
-from my_utils import plot_history
+from my_utils import plot_history, create_video
 import tf_util
 
 
-params = {'expert': 'experts/Hopper-v2.pkl', 'environment': 'Hopper-v2', 'env_max_timesteps': 500, 'render': False,
-          'trajectories': 40, 'run_policy_trajectories': 10, 'training_epochs': 2, 'adam_lr': .001,
+params = {'rl_algorithm': 'dagger', 'expert': 'experts/Hopper-v2.pkl', 'environment': 'Hopper-v2',
+          'env_max_timesteps': 500, 'render': False,
+          'epochs': 21, 'run_policy_trajectories': 10, 'training_epochs': 2, 'adam_lr': .001,
           'mlp_depth': 2, 'mlp_width': 64, 'mlp_activation': 'relu',
           'mlp_input_dim': 11, 'mlp_out_dim': 3, 'batch_size': 512}
 
 f = open('expert_data/Hopper-v2.pkl', 'rb')
 
 data = pickle.loads(f.read())  # keys: observations, actions
-
 
 # Create a MLP to represent policy,
 with tf.variable_scope('my_policy'):
@@ -51,13 +51,14 @@ def train_my_policy(train_data, plot=False):
 
 
 env = gym.make(params['environment'])
-print('env.spec.timestep_limit', env.spec.timestep_limit)
-print('env.action_space.high',env.action_space.high)
-print('env.action_space.low',env.action_space.low)
+env.reset()
+env.render(mode='rgb_array')  # must call render to change camera view
+env.env.viewer.cam.type = 1
+
 max_steps = params['env_max_timesteps'] or env.spec.timestep_limit
 
 
-def run_policy(policy, run_policy_trajectories=params['run_policy_trajectories'], render=params['render']):
+def run_policy(policy, run_policy_trajectories=params['run_policy_trajectories'], save_video=False, video_name='000'):
     """returns observations"""
     observations = []
     actions = []
@@ -68,6 +69,7 @@ def run_policy(policy, run_policy_trajectories=params['run_policy_trajectories']
         obs = env.reset()
         done = False
 
+        frames = []
         while not done:
             action = policy(obs[None, :])
             observations.append(obs)
@@ -75,13 +77,13 @@ def run_policy(policy, run_policy_trajectories=params['run_policy_trajectories']
             obs, r, done, _ = env.step(action)
             totalr += r
             steps += 1
-            if render:
-                env.render()
-            if steps % 100 == 0:
-                #print("%i/%i" % (steps, max_steps))
-                pass
+            frame = env.render(mode='rgb_array')
+            frames.append(frame)
             if steps >= max_steps:
                 break
+
+    if save_video:
+        create_video(frames, video_name=video_name)
 
     return observations, totalr
 
@@ -96,31 +98,37 @@ def expand_dataset_with_expert_help(new_obs, data):
     data['actions'] = np.vstack((data['actions'], np.reshape(expert_actions, (-1, 1, 3))))
 
 
-#data = {'observations': np.empty(data['observations'].shape), 'actions': np.empty(data['actions'].shape)}
+if params['rl_algorithm'] == 'behavioral_cloning':
+    data_collector_policy = model.predict
+elif params['rl_algorithm'] == 'dagger':
+    data_collector_policy = expert_policy
+else:
+    print('no such rl_algorithm!')
+    exit()
+
 with tf.Session():
     tf.global_variables_initializer()
 
     vec_rewards = []
 
-    for i in range(params['trajectories']):
+    for i in range(params['epochs']):
         print(data['observations'].shape, data['actions'].shape)
         #   train my_policy with current data
         if i >0:
             train_my_policy(data, plot=False)
 
-        # let  my_policy play in the environment and get new_observations, collect current stats of policy
-
-        new_obs, reward = run_policy(model.predict,render=False)
-        #new_obs, reward = run_policy(expert_policy,render=False)
-        print('reward', reward)
-
-        new_obs = np.array(new_obs)
+        # let  data_collector_policy play in the environment and get new_observations, collect current stats of policy
+        new_obs, reward = run_policy(data_collector_policy)
 
         # pass new_observations to expand data
-        expand_dataset_with_expert_help(new_obs, data)
+        expand_dataset_with_expert_help(np.array(new_obs), data)
 
-        _, reward = run_policy(model.predict, run_policy_trajectories=1, render=True)
+        # generate a video
+        if i in [1, 4, 8, 12, 16, 20]:
+            _, reward = run_policy(model.predict, run_policy_trajectories=1, save_video=True,
+                                   video_name=params['environment']+'_epoch_'+str(i))
+
         print('reward', reward)
-        #run_policy(expert_policy, run_policy_trajectories=1, render=True)
+
 
 
